@@ -1,14 +1,15 @@
-from single_iminuit_fit import fitProfileMinuit, extractFirstSpectra, selectNonZeros, createFitResultsWorkspace, createCorrelationTableWorkspace, createFitParametersTableWorkspace, plotAutoMinos
-from single_mantid_fit import fitProfileMantidFit
-from resolution import oddPointsRes
+from iminuit_fit_helpers import extractFirstSpectra, selectNonZeros, createFitResultsWorkspace, createCorrelationTableWorkspace, createFitParametersTableWorkspace, plotAutoMinos, oddPointsRes
+from scipy import optimize
 from scipy import  signal
 from mantid.simpleapi import *
 from iminuit import Minuit, cost
 import numpy as np
 import jacobi
 
-ws_resolution = Load("./BaH2_500C_resolution_sum.nxs")
-ws_to_fit = Load("./BaH2_500C.nxs")
+nonlinear_contraint = True
+
+ws_resolution = Load("./BaH2_500C_resolution_1_group.nxs")
+ws_to_fit = Load("./BaH2_500C_1_group.nxs")
 
 def model(x, A, x0, sigma1, c4, c6):
     return  A * np.exp(-(x-x0)**2/2/sigma1**2) / (np.sqrt(2*np.pi*sigma1**2)) \
@@ -36,7 +37,15 @@ costFun = cost.LeastSquares(dataXNZ, dataYNZ, dataENZ, convolvedModel)
 m = Minuit(costFun, **defaultPars)
 
 m.simplex()
-m.migrad()
+
+if not nonlinear_contraint:
+    m.migrad()
+else:
+    def constrFunc(*pars):   # Constrain physical model before convolution
+        return model(dataXNZ, *pars[1:])   # First parameter is intercept, not part of model()
+
+    m.scipy(constraints=optimize.NonlinearConstraint(constrFunc, 0, np.inf))
+
 
 # Explicit calculation of Hessian after the fit
 m.hesse()
@@ -62,9 +71,9 @@ corrMatrix *= 100
 createCorrelationTableWorkspace(ws_to_fit, m.parameters, corrMatrix)
 
 # Extract info from fit before running any MINOS
-parameters = list(m.parameters)
-values = list(m.values)
-errors = list(m.errors)
+parameters = list(m.parameters).copy()
+values = list(m.values).copy()
+errors = list(m.errors).copy()
 minosAutoErr = list(np.zeros((len(parameters), 2)))
 minosManErr = list(np.zeros((len(parameters), 2)))
 
@@ -77,10 +86,9 @@ print("\nWriting Minos errors")
 for i, p in enumerate(parameters):
     minosAutoErr[i] = [me[p].lower, me[p].upper]
 
-plotAutoMinos(m, ws_to_fit.name())
-
 # Create workspace with final fitting parameters and their errors
 createFitParametersTableWorkspace(ws_to_fit, parameters, values, errors, minosAutoErr, minosManErr, chi2)
+plotAutoMinos(m, ws_to_fit.name())
 
 # Mantid Fit
 # TODO: Chnage values to use the same starting points as above
@@ -91,7 +99,7 @@ name=Resolution,Workspace={ws_resolution.name()},WorkspaceIndex=0,X=(),Y=();
 name=UserFunction,Formula=y0 + A*exp( -(x-x0)^2/2./sigma1^2)/(sqrt(2.*3.1415*sigma1^2))
 *(1.+c4/32.*(16.*((x-x0)/sqrt(2)/sigma1)^4-48.*((x-x0)/sqrt(2)/sigma1)^2+12)+c6/384*
 (64*((x-x0)/sqrt(2)/sigma1)^6 - 480*((x-x0)/sqrt(2)/sigma1)^4 + 720*((x-x0)/sqrt(2)/sigma1)^2 - 120)),
-y0=0, A=1,x0=0,sigma1=4.0,c4=0.0,c6=0.0,ties=()
+y0={defaultPars["y0"]}, A={defaultPars["A"]},x0={defaultPars["x0"]},sigma1={defaultPars["sigma1"]},c4={defaultPars["c4"]},c6={defaultPars["c4"]},ties=()
 """
 Fit(
     Function=function,
