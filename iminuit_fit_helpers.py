@@ -75,7 +75,7 @@ def plotAutoMinos(minuitObj, wsName):
     figsize = (12, 7)
     # Output plot to Mantid
     fig, axs = plt.subplots(height, width, tight_layout=True, figsize=figsize, subplot_kw={'projection':'mantid'})
-    fig.canvas.set_window_title(wsName+"_Plot_Automatic_MINOS")
+    fig.canvas.setWindowTitle(wsName+"_Plot_Automatic_MINOS")
 
     for p, ax in zip(minuitObj.parameters, axs.flat):
         loc, fvals, status = minuitObj.mnprofile(p, bound=2)

@@ -6,30 +6,34 @@ from iminuit import Minuit, cost
 import numpy as np
 import jacobi
 
-nonlinear_contraint = True
+# User inputs
+nonlinear_contraint = False
+initial_parameters = {"y0": 0, "A": 1, "x0": 0, "sigma1": 6, "c4": 0, "c6": 0}
 
 ws_resolution = Load("./BaH2_500C_resolution_1_group.nxs")
 ws_to_fit = Load("./BaH2_500C_1_group.nxs")
 
 def model(x, A, x0, sigma1, c4, c6):
     return  A * np.exp(-(x-x0)**2/2/sigma1**2) / (np.sqrt(2*np.pi*sigma1**2)) \
-            *(1 + c4/32*(16*((x-x0)/np.sqrt(2)/sigma1)**4
-                         -48*((x-x0)/np.sqrt(2)/sigma1)**2+12)
-              +c6/384*(64*((x-x0)/np.sqrt(2)/sigma1)**6
-                       -480*((x-x0)/np.sqrt(2)/sigma1)**4 + 720*((x-x0)/np.sqrt(2)/sigma1)**2 - 120))
+            * (1 + c4/32*(16*((x-x0)/np.sqrt(2)/sigma1)**4 - 48*((x-x0)/np.sqrt(2)/sigma1)**2+12)
+            +c6/384*(64*((x-x0)/np.sqrt(2)/sigma1)**6 - 480*((x-x0)/np.sqrt(2)/sigma1)**4 + 720*((x-x0)/np.sqrt(2)/sigma1)**2 - 120))
 
+mantid_formula = "y0 + A*exp( -(x-x0)^2/2./sigma1^2)/(sqrt(2.*3.1415*sigma1^2)) \
+                *(1.+c4/32.*(16.*((x-x0)/sqrt(2)/sigma1)^4-48.*((x-x0)/sqrt(2)/sigma1)^2+12) \
+                +c6/384*(64*((x-x0)/sqrt(2)/sigma1)^6 - 480*((x-x0)/sqrt(2)/sigma1)^4 + 720*((x-x0)/sqrt(2)/sigma1)^2 - 120))"
+
+# Fit with iminuit
 resX, resY, resE = extractFirstSpectra(ws_resolution)
 xDelta, resDense = oddPointsRes(resX, resY)
 
 def convolvedModel(x, y0, *pars):
     return y0 + signal.convolve(model(x, *pars), resDense, mode="same") * xDelta
 
-defaultPars = {"y0":0, "A":1, "x0":0, "sigma1":6, "c4":0, "c6":0}
-limits = {"x": None, "y0": None, "A": (0, None), "x0": None, "sigma1": (0, None), "c4": None, "c6": None}
+defaultPars = {**initial_parameters}
+limits = {"x": None, "y0": None, "A": None, "x0": None, "sigma1": None, "c4": None, "c6": None}
 convolvedModel._parameters = limits
 
 dataX, dataY, dataE = extractFirstSpectra(ws_to_fit)
-# Fit only valid values, ignore cut-offs
 dataXNZ, dataYNZ, dataENZ = selectNonZeros(dataX, dataY, dataE)
 
 costFun = cost.LeastSquares(dataXNZ, dataYNZ, dataENZ, convolvedModel)
@@ -51,21 +55,19 @@ else:
 m.hesse()
 
 # Weighted Chi2
-chi2 = m.fval / (len(dataXNZ)-m.nfit)
+chi2 = m.fval / m.ndof
 
 # Best fit and confidence band
 # Calculated for the whole range of dataX, including where zero
 dataYFit, dataYCov = jacobi.propagate(lambda pars: convolvedModel(dataX, *pars), m.values, m.covariance)
-dataYSigma = np.sqrt(np.diag(dataYCov))
-dataYSigma *= chi2        # Weight the confidence band
+dataYSigma = np.sqrt(np.diag(dataYCov)) * chi2        # Weight the confidence band
 Residuals = dataY - dataYFit
 
 # Create workspace to store best fit curve and errors on the fit
 wsMinFit = createFitResultsWorkspace(ws_to_fit, dataX, dataY, dataE, dataYFit, dataYSigma, Residuals)
 
 # Calculate correlation matrix
-corrMatrix = m.covariance.correlation()
-corrMatrix *= 100
+corrMatrix = m.covariance.correlation() * 100
 
 # Create correlation tableWorkspace
 createCorrelationTableWorkspace(ws_to_fit, m.parameters, corrMatrix)
@@ -91,16 +93,21 @@ createFitParametersTableWorkspace(ws_to_fit, parameters, values, errors, minosAu
 plotAutoMinos(m, ws_to_fit.name())
 
 # Mantid Fit
-# TODO: Chnage values to use the same starting points as above
 minimizer = 'Levenberg-Marquardt'
+
 function = f"""
 composite=Convolution,FixResolution=true,NumDeriv=true;
-name=Resolution,Workspace={ws_resolution.name()},WorkspaceIndex=0,X=(),Y=();
-name=UserFunction,Formula=y0 + A*exp( -(x-x0)^2/2./sigma1^2)/(sqrt(2.*3.1415*sigma1^2))
-*(1.+c4/32.*(16.*((x-x0)/sqrt(2)/sigma1)^4-48.*((x-x0)/sqrt(2)/sigma1)^2+12)+c6/384*
-(64*((x-x0)/sqrt(2)/sigma1)^6 - 480*((x-x0)/sqrt(2)/sigma1)^4 + 720*((x-x0)/sqrt(2)/sigma1)^2 - 120)),
-y0={defaultPars["y0"]}, A={defaultPars["A"]},x0={defaultPars["x0"]},sigma1={defaultPars["sigma1"]},c4={defaultPars["c4"]},c6={defaultPars["c4"]},ties=()
+name=Resolution,Workspace={ws_resolution.name()},WorkspaceIndex=0;
+name=UserFunction,Formula={mantid_formula},
+y0={initial_parameters["y0"]},
+A={initial_parameters["A"]},
+x0={initial_parameters["x0"]},
+sigma1={initial_parameters["sigma1"]},
+c4={initial_parameters["c4"]},
+c6={initial_parameters["c4"]},
+ties=()
 """
+
 Fit(
     Function=function,
     InputWorkspace=ws_to_fit,
