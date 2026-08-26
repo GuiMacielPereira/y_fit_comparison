@@ -136,3 +136,56 @@ def oddPointsRes(x, res):
     resDense = np.interp(xDense, x, res)
 
     return xDelta, resDense
+
+def save_result_of_global_fit(data_x, data_y, data_e, m, total_cost_fun, ws_name, fit_model, chi2):
+    global_sum_name = ws_name + "_global_fit_sum"
+    individual_names = []
+
+    # Create table with only chi2
+    chi2_table_name = ws_name + "_global_fit_" + fit_model + "_chi2"
+    chi2_table = CreateEmptyTableWorkspace(OutputWorkspace=chi2_table_name)
+    chi2_table.setTitle("Global Fit Chi2")
+    chi2_table.addColumn(type="float", name="Chi2")
+    chi2_table.addRow([chi2])
+
+    # Create table of parameters
+    pars_table_name = ws_name + "_global_fit_" + fit_model + "_Parameters"
+    pars_table = CreateEmptyTableWorkspace(OutputWorkspace=pars_table_name)
+    pars_table.setTitle("Global Fit Parameters")
+    pars_table.addColumn(type="int", name="Group")
+    signature = describe(total_cost_fun[0])
+    for parameter in signature:
+        parameter = parameter[:-1] if parameter.endswith("0") else parameter
+        pars_table.addColumn(type="str", name=parameter)
+
+    for i, (x, y, yerr, cost_fun) in enumerate(zip(data_x, data_y, data_e, total_cost_fun)):
+        signature = describe(cost_fun)
+        values = m.values[signature]
+
+        yfit = cost_fun.model(x, *values)
+        res = y - yfit
+
+        CreateWorkspace(
+            DataX=np.concatenate([x, x, x]),
+            DataY=np.concatenate([y, yfit, res]),
+            DataE=np.concatenate([yerr, np.zeros_like(yerr), np.zeros_like(yerr)]),
+            Nspec=3,
+            OutputWorkspace=ws_name + f"_global_fit_{i}",
+            Distribution=True,
+        )
+        individual_names.append(ws_name + f"_global_fit_{i}")
+
+        if i == 1:
+            Plus(ws_name + "_global_fit_0", ws_name + "_global_fit_1", OutputWorkspace=global_sum_name)
+        elif i > 1:
+            Plus(global_sum_name, ws_name + f"_global_fit_{i}", OutputWorkspace=global_sum_name)
+
+        # Build strings for par values
+        errors = m.errors[signature]
+        pars_table.addRow([i] + [f" {v:.3f} +/- {e:.3f} " for v, e in zip(values, errors)])
+
+    individual_names.append(global_sum_name)
+    individual_names.append(pars_table_name)
+    individual_names.append(chi2_table_name)
+
+    return GroupWorkspaces(individual_names, OutputWorkspace=ws_name + "_global_fit_group")

@@ -5,8 +5,8 @@ from iminuit import Minuit, cost
 import numpy as np
 import time
 
-ws_resolution = Load("./D_HMT_resolution.nxs")
-ws_to_fit = Load("./D_HMT_forward.nxs")
+ws_resolution = Load("D_HMT_resolution.nxs")
+ws_to_fit = Load("D_HMT_forward.nxs")
 
 # Need to remove any Masked spectra on both workspaces
 # In this case spectra idx 38 has very anomalous data, need to remove for good fit
@@ -49,6 +49,7 @@ fit_output = Fit(
     **fit_kwargs,
     MaxIterations=10000,
     Minimizer="Levenberg-Marquardt",
+    # Minimizer="FABADA",
     CostFunction="Least squares",
     EvaluationType="CentrePoint",
     Output="Output_Fit"
@@ -72,6 +73,7 @@ for i, (x, y, yerr, res) in enumerate(zip(dataX, dataY, dataE, dataRes)):
     def convolvedModel(xrange, y0, *pars):
         """Performs numerical convolution"""
         return y0 + signal.convolve(model(xrange, *pars), resDense, mode="same") * xDelta
+        # return y0 + model(xrange, *pars)
 
     limits = {"x": None, f"y0{i}": None, f"A{i}": None, f"x0{i}": None, "sigma": None}
     convolvedModel._parameters = limits
@@ -90,8 +92,9 @@ m = Minuit(totCost, **defaultPars)
 
 t0 = time.time()
 
-m.simplex()
-m.migrad()
+# m.simplex()
+# m.migrad()
+m.scipy()
 # Explicitly calculate errors
 m.hesse()
 
